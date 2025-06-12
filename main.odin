@@ -52,6 +52,7 @@ CliArgs :: struct {
     input_device  : string `usage:"microphone device"`,
     output_device : string `usage:"output sound device"`,
     ffmpeg_path: string `usage:"ffmpeg path to executable"`,
+    list_devices: bool `usage:"list available capture and playback devices"`,
 }
 
 
@@ -108,6 +109,15 @@ main :: proc() {
 
     style : flags.Parsing_Style = .Odin
     flags.parse_or_exit(&args, os2.args, style)
+
+    //print available devices on request
+
+    devices : Devices
+    if args.list_devices {
+        devices = enumerate_devices()
+        print_devices(devices)
+        return
+    }
 
     //init user data
     data : UserData
@@ -250,7 +260,7 @@ main :: proc() {
     sync.mutex_unlock(&data.lock)
     t : ^thread.Thread 
     t = thread.create_and_start_with_data(&data, writer_thread_wrapper) 
-
+ 
     // configure duplex device
     cfg := miniaudio.device_config_init(miniaudio.device_type.duplex)
     cfg.capture.format    = miniaudio.format.f32 
@@ -261,30 +271,25 @@ main :: proc() {
     cfg.dataCallback     = data_callback
     cfg.pUserData        = &data
 
-     //list audio interfaces
-     ma_context : miniaudio.context_type
-     if miniaudio.context_init(nil, 0, nil, &ma_context) != .SUCCESS {
-         fmt.eprintln("Failed to initialise miniaudio context")
-     }
-     ppPlaybackDeviceInfos : [^]miniaudio.device_info
-     pPlaybackDeviceCount : u32
-     ppCaptureDeviceInfos : [^]miniaudio.device_info
-     pCaptureDeviceCount : u32
- 
-     if miniaudio.context_get_devices(&ma_context, &ppPlaybackDeviceInfos, &pPlaybackDeviceCount, &ppCaptureDeviceInfos, &pCaptureDeviceCount) != .SUCCESS {
-         fmt.eprintln("Failed to get audio devices")
-     }
-     fmt.println("-------------------------------------------------")
-     fmt.println("Playback devices:")
-     for i in 0..<pPlaybackDeviceCount {
-        fmt.printf("%d - %s\n", i,  ppPlaybackDeviceInfos[i].name)
-    }
-        fmt.println("\nCapture devices:")
-     for i in 0..<pCaptureDeviceCount {
-        fmt.printf("%d - %s\n", i,  ppCaptureDeviceInfos[i].name)
-    }
-    fmt.println("-------------------------------------------------")
+    devices = enumerate_devices()
 
+    if args.input_device != "" {
+        input_devid_id, found := get_device_id(devices.playback, args.input_device)
+        if !found {
+            fmt.eprintln("Input device not found:", args.input_device)
+            return
+        }
+        cfg.capture.pDeviceID = input_devid_id
+    }
+
+    if args.output_device != "" {
+        output_devid_id, found := get_device_id(devices.capture, args.output_device)
+        if !found {
+            fmt.eprintln("Output device not found:", args.input_device)
+            return
+        }
+        cfg.playback.pDeviceID = output_devid_id
+    }
 
     //init miniaudio device
     device : miniaudio.device
